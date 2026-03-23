@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { X } from 'lucide-react'
-import { useFilterStore } from '../../store/filterStore'
+import { useFilterStore, type FilterState } from '../../store/filterStore'
 import { useHandStore } from '../../store/handStore'
 import { CardSlotsFilter } from './CardSlotsFilter'
 import { cn } from '../../lib/cn'
@@ -34,7 +34,7 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
 
 type Tab = 'position' | 'stakes' | 'potType' | 'result' | 'date' | 'cards' | null
 
-function tabHasFilter(tab: Tab, f: ReturnType<typeof useFilterStore>): boolean {
+function tabHasFilter(tab: Tab, f: FilterState): boolean {
   if (tab === 'position') return f.positions.length > 0
   if (tab === 'stakes')   return f.stakes.length > 0
   if (tab === 'potType')  return f.potTypes.length > 0 || f.multiway !== null

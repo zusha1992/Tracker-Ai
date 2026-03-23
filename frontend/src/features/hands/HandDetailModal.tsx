@@ -150,7 +150,7 @@ export const HandDetailModal = ({ hand, onClose, onPrev, onNext }: Props) => {
 
         {/* Streets */}
         <div className="px-5 py-4 space-y-4 max-h-72 overflow-y-auto scrollbar-thin">
-          {streets.map(([label, key], si) => {
+          {streets.map(([label, key]) => {
             const actions = hand.streets[key as keyof typeof hand.streets]
             if (!actions?.length) return null
             const boardCards = key === 'flop' ? boardByStreet[0] : key === 'turn' ? boardByStreet[1] : key === 'river' ? boardByStreet[2] : []

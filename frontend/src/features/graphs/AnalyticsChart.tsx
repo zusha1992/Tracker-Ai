@@ -1,0 +1,267 @@
+import { useState } from 'react'
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ReferenceLine,
+  Brush,
+  CartesianGrid,
+} from 'recharts'
+import { useThemeStore } from '../../store/themeStore'
+import { getChartColors } from '../../theme/tokens'
+import { HandDetailModal } from '../hands/HandDetailModal'
+import type { Hand } from '../../types/hand'
+
+export interface MergedPoint {
+  index: number
+  hand: Hand
+  net: number
+  showdown: number
+  nonShowdown: number
+  rake: number
+}
+
+export type ChartId = 'all' | 'net' | 'showdown' | 'nonShowdown' | 'rake'
+
+type ColorKey = 'green' | 'blue' | 'red' | 'gray'
+
+interface SeriesMeta {
+  key: keyof Pick<MergedPoint, 'net' | 'showdown' | 'nonShowdown' | 'rake'>
+  label: string
+  colorKey: ColorKey
+}
+
+const SERIES: SeriesMeta[] = [
+  { key: 'net',         label: 'Net Winnings',  colorKey: 'green' },
+  { key: 'showdown',    label: 'Showdown',       colorKey: 'blue'  },
+  { key: 'nonShowdown', label: 'Non-Showdown',   colorKey: 'red'   },
+  { key: 'rake',        label: 'Rake Paid',      colorKey: 'gray'  },
+]
+
+interface TooltipProps {
+  active?: boolean
+  payload?: { dataKey: string; value: number; color: string; payload: MergedPoint }[]
+  activeChart: ChartId
+  hidden: Set<string>
+}
+
+const CustomTooltip = ({ active, payload, activeChart, hidden }: TooltipProps) => {
+  if (!active || !payload?.length) return null
+  const point = payload[0].payload   // direct from Recharts — no index lookup needed
+  if (!point) return null
+  const h = point.hand
+
+  const visiblePayload = (payload ?? []).filter((p) => {
+    if (hidden.has(p.dataKey)) return false
+    if (activeChart !== 'all' && p.dataKey !== activeChart) return false
+    return true
+  })
+
+  return (
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-xs shadow-lg min-w-[160px]">
+      <p className="font-semibold text-[var(--text-primary)] mb-1">Hand #{h.handId.slice(-6)}</p>
+      <p className="text-[var(--text-muted)]">{h.stakes} · {h.position ?? '?'}</p>
+      {h.holeCards.length > 0 && (
+        <p className="text-[var(--text-muted)]">{h.holeCards.join(' ')}</p>
+      )}
+      <p
+        className="font-bold mt-1"
+        style={{ color: h.netWinnings >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}
+      >
+        {h.netWinnings >= 0 ? '+' : ''}${h.netWinnings.toFixed(2)}
+      </p>
+      <div className="mt-1 space-y-0.5">
+        {visiblePayload.map((p) => (
+          <p key={p.dataKey} style={{ color: p.color }}>
+            {SERIES.find((s) => s.key === p.dataKey)?.label}: ${p.value.toFixed(2)}
+          </p>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+interface Props {
+  points: MergedPoint[]
+  activeChart: ChartId
+}
+
+export const AnalyticsChart = ({ points, activeChart }: Props) => {
+  const isDark = useThemeStore((s) => s.isDark)
+  const colors = getChartColors(isDark)
+  const [selectedHand, setSelectedHand] = useState<Hand | null>(null)
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
+  const [hidden, setHidden] = useState<Set<string>>(new Set())
+
+  const toggleSeries = (key: string) => {
+    setHidden((prev) => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleClick = (data: any) => {
+    if (data?.activePayload?.[0]?.payload) {
+      const point: MergedPoint = data.activePayload[0].payload
+      setSelectedHand(point.hand)
+      setSelectedIdx(point.index - 1)
+    }
+  }
+
+  const handlePrev =
+    selectedIdx !== null && selectedIdx > 0
+      ? () => { setSelectedHand(points[selectedIdx - 1].hand); setSelectedIdx(selectedIdx - 1) }
+      : undefined
+
+  const handleNext =
+    selectedIdx !== null && selectedIdx < points.length - 1
+      ? () => { setSelectedHand(points[selectedIdx + 1].hand); setSelectedIdx(selectedIdx + 1) }
+      : undefined
+
+  const colorMap: Record<ColorKey, string> = {
+    green: colors.green,
+    blue:  colors.blue,
+    red:   colors.red,
+    gray:  isDark ? '#555e6b' : '#9ca3af',
+  }
+
+  // In single-tab mode: show only that series (ignoring toggle state)
+  // In all mode: show series that aren't hidden
+  const visibleSeries = activeChart === 'all'
+    ? SERIES.filter((s) => !hidden.has(s.key))
+    : SERIES.filter((s) => s.key === activeChart)
+
+  // Legend always shows all series so you can toggle in "all" mode
+  const legendSeries = activeChart === 'all' ? SERIES : SERIES.filter((s) => s.key === activeChart)
+
+  // Use the actual hand number of the last point (not downsampled array length)
+  const maxIndex = points.length > 0 ? points[points.length - 1].index : 0
+
+  const xTicks = (() => {
+    if (maxIndex === 0) return []
+    const rawStep = maxIndex / 7
+    const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)))
+    const norm = rawStep / magnitude
+    const niceStep = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10
+    const step = niceStep * magnitude
+    const ticks: number[] = []
+    for (let t = step; t < maxIndex; t += step) ticks.push(Math.round(t))
+    ticks.push(maxIndex)
+    return ticks
+  })()
+
+  return (
+    <>
+      <div
+        className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-4"
+        style={{ animation: 'chart-fadein 0.3s ease' }}
+      >
+        {/* Legend / toggles */}
+        <div className="flex flex-wrap gap-3 mb-4 pl-1">
+          {legendSeries.map((s) => {
+            const isHidden = activeChart === 'all' && hidden.has(s.key)
+            return (
+              <button
+                key={s.key}
+                onClick={() => activeChart === 'all' && toggleSeries(s.key)}
+                className="flex items-center gap-1.5 text-xs transition-opacity"
+                style={{
+                  opacity: isHidden ? 0.35 : 1,
+                  cursor: activeChart === 'all' ? 'pointer' : 'default',
+                }}
+                title={activeChart === 'all' ? (isHidden ? 'Show' : 'Hide') : undefined}
+              >
+                <span
+                  className="inline-block w-5 rounded-full transition-all"
+                  style={{
+                    height: isHidden ? '1px' : '2px',
+                    background: colorMap[s.colorKey],
+                  }}
+                />
+                <span style={{ color: isHidden ? 'var(--text-muted)' : colorMap[s.colorKey] }}>
+                  {s.label}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+
+        <ResponsiveContainer width="100%" height={380} style={{ overflow: 'visible' }}>
+          <LineChart
+            data={points}
+            onClick={handleClick}
+            margin={{ top: 4, right: 16, left: 0, bottom: 8 }}
+            style={{ cursor: 'pointer' }}
+          >
+            <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={true} />
+
+            <XAxis
+              dataKey="index"
+              type="number"
+              domain={[1, maxIndex]}
+              tick={{ fontSize: 11, fill: colors.muted, fontWeight: 500 }}
+              axisLine={{ stroke: colors.border }}
+              tickLine={false}
+              ticks={xTicks}
+              tickFormatter={(v) => v.toLocaleString()}
+            />
+            <YAxis
+              orientation="left"
+              tick={{ fontSize: 11, fill: colors.muted, fontWeight: 500 }}
+              axisLine={false}
+              tickLine={false}
+              tickCount={7}
+              tickFormatter={(v) => `$${Math.round(v).toLocaleString()}`}
+              width={75}
+            />
+
+            <Tooltip
+              content={<CustomTooltip activeChart={activeChart} hidden={hidden} />}
+              isAnimationActive={false}
+              allowEscapeViewBox={{ x: false, y: false }}
+              wrapperStyle={{ zIndex: 50 }}
+            />
+
+            <ReferenceLine y={0} stroke={colors.muted} strokeWidth={1} />
+
+            {visibleSeries.map((s) => (
+              <Line
+                key={s.key}
+                type="monotone"
+                dataKey={s.key}
+                stroke={colorMap[s.colorKey]}
+                strokeWidth={1.5}
+                dot={false}
+                isAnimationActive={false}
+                activeDot={{ r: 3, fill: colorMap[s.colorKey], stroke: 'none' }}
+              />
+            ))}
+
+            <Brush
+              dataKey="index"
+              height={22}
+              stroke={colors.border}
+              fill={colors.elevated}
+              travellerWidth={6}
+              tickFormatter={(v) => `#${v}`}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      {selectedHand && (
+        <HandDetailModal
+          hand={selectedHand}
+          onClose={() => { setSelectedHand(null); setSelectedIdx(null) }}
+          onPrev={handlePrev}
+          onNext={handleNext}
+        />
+      )}
+    </>
+  )
+}

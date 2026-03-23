@@ -1,7 +1,12 @@
+import { useMemo } from 'react'
+import { Loader2 } from 'lucide-react'
 import { useHandStore } from '../store/handStore'
 import { useFilteredHands } from '../hooks/useFilteredHands'
+import { useThemeStore } from '../store/themeStore'
+import { getChartColors } from '../theme/tokens'
 import { FileUpload } from '../features/upload/FileUpload'
 import { FileStatus } from '../features/upload/FileStatus'
+import { CumulativeChart } from '../features/graphs/CumulativeChart'
 
 const API = 'http://localhost:8000'
 
@@ -10,6 +15,8 @@ export const Dashboard = () => {
   const isParsing  = useHandStore((s) => s.isParsing)
   const allHands   = useHandStore((s) => s.hands)
   const hands      = useFilteredHands()
+  const isDark     = useThemeStore((s) => s.isDark)
+  const colors     = getChartColors(isDark)
   const parseError = useHandStore((s) => s.parseError)
   const setIsParsing  = useHandStore((s) => s.setIsParsing)
   const setHands      = useHandStore((s) => s.setHands)
@@ -38,6 +45,15 @@ export const Dashboard = () => {
     }
   }
 
+  const netPoints = useMemo(() => {
+    let cum = 0
+    return hands.map((h, i) => ({
+      index: i + 1,
+      cumulative: Math.round((cum += h.netWinnings) * 100) / 100,
+      hand: h,
+    }))
+  }, [hands])
+
   // Compute stats from hands
   const totalProfit = hands.reduce((s, h) => s + h.netWinnings, 0)
   const totalRake   = hands.reduce((s, h) => s + h.rake, 0)
@@ -61,11 +77,25 @@ export const Dashboard = () => {
         <button
           onClick={handleParse}
           disabled={isParsing}
-          className="w-full py-2.5 rounded-lg text-sm font-semibold transition-colors
-            bg-[var(--accent-green)] text-white
-            hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="relative w-full py-2.5 rounded-lg text-sm font-semibold overflow-hidden
+            bg-[var(--accent-green)] text-white hover:opacity-90
+            disabled:cursor-not-allowed transition-opacity"
         >
-          {isParsing ? 'Parsing…' : `Parse ${rawFiles.length} file${rawFiles.length > 1 ? 's' : ''}`}
+          {/* Shimmer sweep when parsing */}
+          {isParsing && (
+            <span
+              className="absolute inset-0 -translate-x-full animate-[shimmer_1.4s_ease-in-out_infinite]"
+              style={{
+                background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.18) 50%, transparent 100%)',
+              }}
+            />
+          )}
+          <span className="relative flex items-center justify-center gap-2">
+            {isParsing && <Loader2 size={15} className="animate-spin" />}
+            {isParsing
+              ? `Parsing ${rawFiles.length} file${rawFiles.length > 1 ? 's' : ''}…`
+              : `Parse ${rawFiles.length} file${rawFiles.length > 1 ? 's' : ''}`}
+          </span>
         </button>
       )}
 
@@ -77,20 +107,29 @@ export const Dashboard = () => {
 
       {/* Stat cards */}
       {allHands.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard label="Total Hands" value={hands.length.toLocaleString()} />
-          <StatCard
-            label="Total Profit"
-            value={`${totalProfit >= 0 ? '+' : ''}$${totalProfit.toFixed(2)}`}
-            positive={totalProfit >= 0}
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatCard label="Total Hands" value={hands.length.toLocaleString()} />
+            <StatCard
+              label="Total Profit"
+              value={`${totalProfit >= 0 ? '+' : ''}$${totalProfit.toFixed(2)}`}
+              positive={totalProfit >= 0}
+            />
+            <StatCard
+              label="BB / 100"
+              value={`${bb100 >= 0 ? '+' : ''}${bb100.toFixed(1)}`}
+              positive={bb100 >= 0}
+            />
+            <StatCard label="Rake Paid" value={`$${totalRake.toFixed(2)}`} />
+          </div>
+          <CumulativeChart
+            points={netPoints}
+            color={colors.green}
+            title="Net Winnings"
+            height={180}
+            showBrush={false}
           />
-          <StatCard
-            label="BB / 100"
-            value={`${bb100 >= 0 ? '+' : ''}${bb100.toFixed(1)}`}
-            positive={bb100 >= 0}
-          />
-          <StatCard label="Rake Paid" value={`$${totalRake.toFixed(2)}`} />
-        </div>
+        </>
       )}
     </div>
   )
