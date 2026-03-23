@@ -1,5 +1,69 @@
 import re
+import random
 from datetime import datetime
+
+try:
+    from treys import Card, Evaluator, Deck
+    _TREYS_AVAILABLE = True
+except ImportError:
+    _TREYS_AVAILABLE = False
+
+
+def _calculate_equity(hero_cards: list[str], villain_cards: list[str], board: list[str]) -> float:
+    """Hero's equity (0.0–1.0) at the moment of all-in via Monte Carlo."""
+    if not _TREYS_AVAILABLE:
+        return 0.5
+    try:
+        evaluator = Evaluator()
+        hero    = [Card.new(c) for c in hero_cards]
+        villain = [Card.new(c) for c in villain_cards]
+        board_c = [Card.new(c) for c in board]
+    except Exception:
+        return 0.5
+
+    cards_needed = 5 - len(board_c)
+
+    if cards_needed == 0:
+        # River — deterministic
+        try:
+            hs = evaluator.evaluate(board_c, hero)
+            vs = evaluator.evaluate(board_c, villain)
+            return 1.0 if hs < vs else (0.5 if hs == vs else 0.0)
+        except Exception:
+            return 0.5
+
+    dealt   = set(hero + villain + board_c)
+    remaining = [c for c in Deck.GetFullDeck() if c not in dealt]
+
+    wins  = 0.0
+    N     = 600
+    for _ in range(N):
+        extra = random.sample(remaining, cards_needed)
+        full_board = board_c + extra
+        try:
+            hs = evaluator.evaluate(full_board, hero)
+            vs = evaluator.evaluate(full_board, villain)
+            if   hs < vs: wins += 1.0
+            elif hs == vs: wins += 0.5
+        except Exception:
+            wins += 0.5
+
+    return wins / N
+
+
+def _allin_street(hand_text: str) -> str | None:
+    """Return the street name where the first all-in occurred, or None."""
+    sections = [
+        ('preflop', r'\*\*\* HOLE CARDS \*\*\*(.*?)(?=\*\*\* (?:FLOP|SHOW DOWN|SUMMARY))'),
+        ('flop',    r'\*\*\* FLOP \*\*\*[^\n]*\n(.*?)(?=\*\*\* (?:TURN|SHOW DOWN|SUMMARY))'),
+        ('turn',    r'\*\*\* TURN \*\*\*[^\n]*\n(.*?)(?=\*\*\* (?:RIVER|SHOW DOWN|SUMMARY))'),
+        ('river',   r'\*\*\* RIVER \*\*\*[^\n]*\n(.*?)(?=\*\*\* (?:SHOW DOWN|SUMMARY))'),
+    ]
+    for street, pat in sections:
+        m = re.search(pat, hand_text, re.DOTALL)
+        if m and re.search(r'and is all-in', m.group(1), re.IGNORECASE):
+            return street
+    return None
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -326,6 +390,26 @@ def parse_hand_full(hand_text: str) -> dict | None:
     # ── streets ───────────────────────────────────────────────────────────────
     streets = _parse_streets(hand_text, bb_val)
 
+    # ── EV winnings ───────────────────────────────────────────────────────────
+    # Default: actual result (folds, regular showdowns, parse errors)
+    ev_winnings = net
+
+    allin_st = _allin_street(hand_text)
+    # Only calculate equity for HU all-in with both players' cards known
+    if allin_st and len(showdown_cards) == 2 and 'Hero' in showdown_cards:
+        villain_name  = next(n for n in showdown_cards if n != 'Hero')
+        villain_cards = showdown_cards[villain_name]
+        board_at_allin = {
+            'preflop': [],
+            'flop':    board[:3],
+            'turn':    board[:4],
+            'river':   board[:5],
+        }[allin_st]
+
+        equity      = _calculate_equity(hole_cards, villain_cards, board_at_allin)
+        distributed = pot - total_rake          # what actually gets paid out
+        ev_winnings = round(equity * distributed - hero_invested, 2)
+
     return {
         'handId':          hand_id,
         'timestamp':       timestamp.isoformat(),
@@ -345,6 +429,7 @@ def parse_hand_full(hand_text: str) -> dict | None:
         'opponents':       opponents,
         'playerPositions': player_positions,
         'streets':         streets,
+        'evWinnings':      ev_winnings,
     }
 
 

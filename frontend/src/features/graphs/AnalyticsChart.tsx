@@ -7,7 +7,6 @@ import {
   YAxis,
   Tooltip,
   ReferenceLine,
-  Brush,
   CartesianGrid,
 } from 'recharts'
 import { useThemeStore } from '../../store/themeStore'
@@ -21,24 +20,26 @@ export interface MergedPoint {
   net: number
   showdown: number
   nonShowdown: number
+  ev: number
   rake: number
 }
 
-export type ChartId = 'all' | 'net' | 'showdown' | 'nonShowdown' | 'rake'
+export type ChartId = 'all' | 'net' | 'showdown' | 'nonShowdown' | 'ev' | 'rake'
 
-type ColorKey = 'green' | 'blue' | 'red' | 'gray'
+type ColorKey = 'green' | 'blue' | 'red' | 'orange' | 'gray'
 
 interface SeriesMeta {
-  key: keyof Pick<MergedPoint, 'net' | 'showdown' | 'nonShowdown' | 'rake'>
+  key: keyof Pick<MergedPoint, 'net' | 'showdown' | 'nonShowdown' | 'ev' | 'rake'>
   label: string
   colorKey: ColorKey
 }
 
 const SERIES: SeriesMeta[] = [
-  { key: 'net',         label: 'Net Winnings',  colorKey: 'green' },
-  { key: 'showdown',    label: 'Showdown',       colorKey: 'blue'  },
-  { key: 'nonShowdown', label: 'Non-Showdown',   colorKey: 'red'   },
-  { key: 'rake',        label: 'Rake Paid',      colorKey: 'gray'  },
+  { key: 'net',         label: 'Net Winnings',  colorKey: 'green'  },
+  { key: 'showdown',    label: 'Showdown',       colorKey: 'blue'   },
+  { key: 'nonShowdown', label: 'Non-Showdown',   colorKey: 'red'    },
+  { key: 'ev',          label: 'EV',             colorKey: 'orange' },
+  { key: 'rake',        label: 'Rake Paid',      colorKey: 'gray'   },
 ]
 
 interface TooltipProps {
@@ -104,12 +105,11 @@ export const AnalyticsChart = ({ points, activeChart }: Props) => {
     })
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleClick = (data: any) => {
-    if (data?.activePayload?.[0]?.payload) {
-      const point: MergedPoint = data.activePayload[0].payload
+  const openHand = (point: MergedPoint) => {
+    const arrayIdx = points.findIndex((p) => p.index === point.index)
+    if (arrayIdx !== -1) {
       setSelectedHand(point.hand)
-      setSelectedIdx(point.index - 1)
+      setSelectedIdx(arrayIdx)
     }
   }
 
@@ -124,10 +124,11 @@ export const AnalyticsChart = ({ points, activeChart }: Props) => {
       : undefined
 
   const colorMap: Record<ColorKey, string> = {
-    green: colors.green,
-    blue:  colors.blue,
-    red:   colors.red,
-    gray:  isDark ? '#555e6b' : '#9ca3af',
+    green:  colors.green,
+    blue:   colors.blue,
+    red:    colors.red,
+    orange: colors.orange,
+    gray:   isDark ? '#555e6b' : '#9ca3af',
   }
 
   // In single-tab mode: show only that series (ignoring toggle state)
@@ -139,21 +140,8 @@ export const AnalyticsChart = ({ points, activeChart }: Props) => {
   // Legend always shows all series so you can toggle in "all" mode
   const legendSeries = activeChart === 'all' ? SERIES : SERIES.filter((s) => s.key === activeChart)
 
-  // Use the actual hand number of the last point (not downsampled array length)
-  const maxIndex = points.length > 0 ? points[points.length - 1].index : 0
-
-  const xTicks = (() => {
-    if (maxIndex === 0) return []
-    const rawStep = maxIndex / 7
-    const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)))
-    const norm = rawStep / magnitude
-    const niceStep = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10
-    const step = niceStep * magnitude
-    const ticks: number[] = []
-    for (let t = step; t < maxIndex; t += step) ticks.push(Math.round(t))
-    ticks.push(maxIndex)
-    return ticks
-  })()
+  // Show ~7 evenly spaced tick labels across the categorical axis
+  const xTickInterval = Math.max(1, Math.floor(points.length / 7)) - 1
 
   return (
     <>
@@ -194,21 +182,17 @@ export const AnalyticsChart = ({ points, activeChart }: Props) => {
         <ResponsiveContainer width="100%" height={380} style={{ overflow: 'visible' }}>
           <LineChart
             data={points}
-            onClick={handleClick}
             margin={{ top: 4, right: 16, left: 0, bottom: 8 }}
-            style={{ cursor: 'pointer' }}
           >
             <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={true} />
 
             <XAxis
               dataKey="index"
-              type="number"
-              domain={[1, maxIndex]}
               tick={{ fontSize: 11, fill: colors.muted, fontWeight: 500 }}
               axisLine={{ stroke: colors.border }}
               tickLine={false}
-              ticks={xTicks}
-              tickFormatter={(v) => v.toLocaleString()}
+              interval={xTickInterval}
+              tickFormatter={(v) => Number(v).toLocaleString()}
             />
             <YAxis
               orientation="left"
@@ -229,7 +213,7 @@ export const AnalyticsChart = ({ points, activeChart }: Props) => {
 
             <ReferenceLine y={0} stroke={colors.muted} strokeWidth={1} />
 
-            {visibleSeries.map((s) => (
+            {visibleSeries.map((s, si) => (
               <Line
                 key={s.key}
                 type="monotone"
@@ -238,18 +222,26 @@ export const AnalyticsChart = ({ points, activeChart }: Props) => {
                 strokeWidth={1.5}
                 dot={false}
                 isAnimationActive={false}
-                activeDot={{ r: 3, fill: colorMap[s.colorKey], stroke: 'none' }}
+                activeDot={(dotProps: any) => {
+                  const point: MergedPoint = dotProps.payload
+                  // Only the first visible series renders the clickable dot to avoid stacking
+                  if (si !== 0) return <circle cx={dotProps.cx} cy={dotProps.cy} r={0} />
+                  return (
+                    <circle
+                      cx={dotProps.cx}
+                      cy={dotProps.cy}
+                      r={6}
+                      fill={colorMap[s.colorKey]}
+                      stroke={colors.surface}
+                      strokeWidth={2}
+                      style={{ cursor: 'pointer' }}
+                      onClick={(e) => { e.stopPropagation(); openHand(point) }}
+                    />
+                  )
+                }}
               />
             ))}
 
-            <Brush
-              dataKey="index"
-              height={22}
-              stroke={colors.border}
-              fill={colors.elevated}
-              travellerWidth={6}
-              tickFormatter={(v) => `#${v}`}
-            />
           </LineChart>
         </ResponsiveContainer>
       </div>

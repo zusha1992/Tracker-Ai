@@ -11,19 +11,21 @@ const TABS: { id: ChartId; label: string }[] = [
   { id: 'net',         label: 'Net Winnings' },
   { id: 'showdown',    label: 'Showdown' },
   { id: 'nonShowdown', label: 'Non-Showdown' },
+  { id: 'ev',          label: 'EV' },
   { id: 'rake',        label: 'Rake' },
 ]
 
 const MAX_POINTS = 1000
 
 function buildMergedPoints(hands: Hand[]): MergedPoint[] {
-  let net = 0, showdown = 0, nonShowdown = 0, rake = 0
+  let net = 0, showdown = 0, nonShowdown = 0, ev = 0, rake = 0
   const all = hands.map((h, i) => {
     net         = Math.round((net         + h.netWinnings)                         * 100) / 100
     showdown    = Math.round((showdown    + (h.wentToShowdown  ? h.netWinnings : 0)) * 100) / 100
     nonShowdown = Math.round((nonShowdown + (!h.wentToShowdown ? h.netWinnings : 0)) * 100) / 100
+    ev          = Math.round((ev          + (h.evWinnings ?? h.netWinnings))        * 100) / 100
     rake        = Math.round((rake        + h.rake)                                * 100) / 100
-    return { index: i + 1, hand: h, net, showdown, nonShowdown, rake }
+    return { index: i + 1, hand: h, net, showdown, nonShowdown, ev, rake }
   })
 
   // Downsample for rendering performance — keep every Nth point + always keep last

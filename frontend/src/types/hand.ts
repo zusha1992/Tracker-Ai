@@ -30,4 +30,5 @@ export interface Hand {
   opponents: string[]
   playerPositions: Record<string, string>
   streets: Streets
+  evWinnings: number
 }
