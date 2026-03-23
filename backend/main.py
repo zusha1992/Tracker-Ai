@@ -1,6 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from parsers.gg_parser import parse_files_summary
+from parsers.gg_parser import parse_files_summary, parse_files_full
 
 app = FastAPI(title="Tracker AI API", version="0.1.0")
 
@@ -38,3 +38,25 @@ async def parse_summary(files: list[UploadFile] = File(...)):
 
     result = parse_files_summary(contents)
     return result
+
+
+@app.post("/api/parse/hands")
+async def parse_hands(files: list[UploadFile] = File(...)):
+    """
+    Accept one or more .txt hand history files and return the full Hand[] array.
+    """
+    contents: list[str] = []
+    for f in files:
+        if not f.filename or not f.filename.endswith(".txt"):
+            raise HTTPException(status_code=400, detail=f"Only .txt files are accepted (got: {f.filename})")
+        raw = await f.read()
+        try:
+            contents.append(raw.decode("utf-8"))
+        except UnicodeDecodeError:
+            contents.append(raw.decode("latin-1"))
+
+    if not contents:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    hands = parse_files_full(contents)
+    return {"hands": hands}

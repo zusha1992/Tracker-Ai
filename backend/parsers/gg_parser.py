@@ -2,42 +2,33 @@ import re
 from datetime import datetime
 
 
+# ── helpers ──────────────────────────────────────────────────────────────────
+
 def split_hands(content: str) -> list[str]:
     """Split a file's content into individual hand blocks."""
     blocks = re.split(r'\n{2,}', content.strip())
     return [b.strip() for b in blocks if b.strip().startswith('Poker Hand')]
 
 
+# ── summary (Phase 3) ─────────────────────────────────────────────────────────
+
 def parse_hand_header(hand_text: str) -> dict | None:
-    """Extract lightweight summary info from a single hand."""
     m = re.search(
         r'Poker Hand #(\w+):.*?\(\$([0-9.]+)/\$([0-9.]+)\) - (\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})',
         hand_text,
     )
     if not m:
         return None
-
-    hand_id = m.group(1)
     bb = float(m.group(3))
-    timestamp = datetime.strptime(m.group(4), '%Y/%m/%d %H:%M:%S')
-    stakes = f"NL{int(bb * 100)}"
-
     return {
-        'handId': hand_id,
+        'handId': m.group(1),
         'bb': bb,
-        'stakes': stakes,
-        'timestamp': timestamp,
+        'stakes': f"NL{int(bb * 100)}",
+        'timestamp': datetime.strptime(m.group(4), '%Y/%m/%d %H:%M:%S'),
     }
 
 
 def parse_files_summary(contents: list[str]) -> dict:
-    """
-    Parse one or more file contents (as strings) and return a top-level summary:
-    - hand count
-    - unique stakes
-    - date range
-    - detected site & hero name
-    """
     hand_count = 0
     stakes_set: set[str] = set()
     timestamps: list[datetime] = []
@@ -51,7 +42,6 @@ def parse_files_summary(contents: list[str]) -> dict:
                 timestamps.append(info['timestamp'])
 
     timestamps.sort()
-
     return {
         'handCount': hand_count,
         'stakes': sorted(stakes_set),
@@ -62,3 +52,309 @@ def parse_files_summary(contents: list[str]) -> dict:
         'hero': 'Hero',
         'site': 'GGPoker',
     }
+
+
+# ── full parse (Phase 4) ──────────────────────────────────────────────────────
+
+_POSITION_MAPS = {
+    2: ['BTN', 'BB'],
+    3: ['BTN', 'SB', 'BB'],
+    4: ['BTN', 'SB', 'BB', 'UTG'],
+    5: ['BTN', 'SB', 'BB', 'UTG', 'CO'],
+    6: ['BTN', 'SB', 'BB', 'UTG', 'HJ', 'CO'],
+}
+
+
+def _get_position(seat_nums: list[int], button_seat: int, hero_seat: int) -> str:
+    n = len(seat_nums)
+    pos_names = _POSITION_MAPS.get(n, ['BTN', 'SB', 'BB', 'UTG', 'HJ', 'CO'])
+    if button_seat not in seat_nums:
+        return 'BTN'
+    btn_idx = seat_nums.index(button_seat)
+    hero_idx = seat_nums.index(hero_seat)
+    offset = (hero_idx - btn_idx) % n
+    return pos_names[offset] if offset < len(pos_names) else '?'
+
+
+def _parse_net(hand_text: str, bb: float) -> tuple[float, float, float]:
+    """Return (net_dollars, net_bb, hero_invested) for Hero."""
+    hero_invested = 0.0
+    hero_street_invested = 0.0  # resets each street
+
+    for line in hand_text.split('\n'):
+        line = line.strip()
+
+        # Street boundaries — reset per-street tracker (NOT at HOLE CARDS — blinds carry over into preflop)
+        if re.match(r'\*\*\* (FLOP|TURN|RIVER) \*\*\*', line):
+            hero_street_invested = 0.0
+            continue
+
+        if re.match(r'\*\*\* (SHOW DOWN|SUMMARY) \*\*\*', line):
+            break
+
+        # Blind posts (before HOLE CARDS but counted)
+        m = re.match(r'Hero: posts (?:small|big) blind \$([0-9.]+)', line)
+        if m:
+            amt = float(m.group(1))
+            hero_invested += amt
+            hero_street_invested += amt
+            continue
+
+        # Call
+        m = re.match(r'Hero: calls \$([0-9.]+)', line)
+        if m:
+            amt = float(m.group(1))
+            hero_invested += amt
+            hero_street_invested += amt
+            continue
+
+        # Bet
+        m = re.match(r'Hero: bets \$([0-9.]+)', line)
+        if m:
+            amt = float(m.group(1))
+            hero_invested += amt
+            hero_street_invested += amt
+            continue
+
+        # Raise — $Y is hero's total this street
+        m = re.match(r'Hero: raises \$[0-9.]+ to \$([0-9.]+)', line)
+        if m:
+            y = float(m.group(1))
+            additional = y - hero_street_invested
+            hero_invested += additional
+            hero_street_invested = y
+            continue
+
+        # Uncalled bet returned
+        m = re.match(r'Uncalled bet \(\$([0-9.]+)\) returned to Hero', line)
+        if m:
+            hero_invested -= float(m.group(1))
+
+    # Collected
+    hero_collected = sum(
+        float(m.group(1))
+        for m in re.finditer(r'Hero collected \$([0-9.]+) from', hand_text)
+    )
+
+    net = round(hero_collected - hero_invested, 2)
+    net_bb = round(net / bb, 2) if bb > 0 else 0.0
+    return net, net_bb, hero_invested
+
+
+def _action_label(raw: str, street: str, bet_count: int, bb: float) -> str:
+    """Convert a raw action string to a human-readable label."""
+    if raw in ('folds', 'checks'):
+        return raw
+
+    m = re.match(r'raises \$[0-9.]+ to \$([0-9.]+)', raw)
+    if m:
+        to_amt = m.group(1)
+        n = bet_count + 1  # this raise is the nth bet
+        if n <= 2:
+            return f'raises to ${to_amt}'
+        return f'{n}-bets to ${to_amt}'
+
+    m = re.match(r'bets \$([0-9.]+)', raw)
+    if m:
+        return f'bets ${m.group(1)}'
+
+    m = re.match(r'calls \$([0-9.]+)', raw)
+    if m:
+        amt_str = m.group(1)
+        # Limp: preflop, calling the BB, no raise yet (bet_count == 1 = only BB posted)
+        if street == 'preflop' and bet_count == 1 and abs(float(amt_str) - bb) < 0.01:
+            return f'limps ${amt_str}'
+        return f'calls ${amt_str}'
+
+    m = re.match(r'posts small blind \$([0-9.]+)', raw)
+    if m:
+        return f'posts SB ${m.group(1)}'
+
+    m = re.match(r'posts big blind \$([0-9.]+)', raw)
+    if m:
+        return f'posts BB ${m.group(1)}'
+
+    return raw
+
+
+def _parse_streets(hand_text: str, bb: float) -> dict:
+    """Extract action lists per street, with human-readable labels."""
+    street_patterns = [
+        ('preflop', r'\*\*\* HOLE CARDS \*\*\*', r'\*\*\* (?:FLOP|SHOW DOWN|SUMMARY) \*\*\*'),
+        ('flop',    r'\*\*\* FLOP \*\*\* \[[^\]]+\]', r'\*\*\* (?:TURN|SHOW DOWN|SUMMARY) \*\*\*'),
+        ('turn',    r'\*\*\* TURN \*\*\* \[[^\]]+\] \[[^\]]+\]', r'\*\*\* (?:RIVER|SHOW DOWN|SUMMARY) \*\*\*'),
+        ('river',   r'\*\*\* RIVER \*\*\* \[[^\]]+\] \[[^\]]+\]', r'\*\*\* (?:SHOW DOWN|SUMMARY) \*\*\*'),
+    ]
+
+    result: dict[str, list] = {}
+    action_re = re.compile(
+        r'^(\S+): (folds|checks|calls \$[0-9.]+|bets \$[0-9.]+|raises \$[0-9.]+ to \$[0-9.]+|posts (?:small|big) blind \$[0-9.]+)'
+    )
+
+    for street, start_pat, end_pat in street_patterns:
+        m = re.search(f'(?:{start_pat})(.*?)(?:{end_pat})', hand_text, re.DOTALL)
+        if not m:
+            continue
+
+        # Preflop: BB post counts as bet 1 already on the table
+        bet_count = 1 if street == 'preflop' else 0
+        actions = []
+
+        for raw_line in m.group(1).split('\n'):
+            raw_line = raw_line.strip()
+            am = action_re.match(raw_line)
+            if not am:
+                continue
+            raw_action = am.group(2)
+            label = _action_label(raw_action, street, bet_count, bb)
+            # Increment bet count after a bet or raise
+            if re.match(r'(raises|bets) ', raw_action):
+                bet_count += 1
+            actions.append({'player': am.group(1), 'action': raw_action, 'label': label})
+
+        if actions:
+            result[street] = actions
+
+    return result
+
+
+def parse_hand_full(hand_text: str) -> dict | None:
+    # ── header ────────────────────────────────────────────────────────────────
+    hm = re.search(
+        r'Poker Hand #(\w+):.*?\(\$([0-9.]+)/\$([0-9.]+)\) - (\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})',
+        hand_text,
+    )
+    if not hm:
+        return None
+
+    hand_id = hm.group(1)
+    sb_val  = float(hm.group(2))
+    bb_val  = float(hm.group(3))
+    timestamp = datetime.strptime(hm.group(4), '%Y/%m/%d %H:%M:%S')
+    stakes = f"NL{int(bb_val * 100)}"
+
+    # ── table + button ────────────────────────────────────────────────────────
+    tm = re.search(r"Table '([^']+)' \d+-max Seat #(\d+) is the button", hand_text)
+    button_seat = int(tm.group(2)) if tm else None
+
+    # ── seats ─────────────────────────────────────────────────────────────────
+    seats: dict[int, str] = {}  # seat_num → player_name
+    for m in re.finditer(r'Seat (\d+): (\S+) \(\$[0-9.]+ in chips\)', hand_text):
+        seats[int(m.group(1))] = m.group(2)
+
+    hero_seat = next((s for s, n in seats.items() if n == 'Hero'), None)
+    seat_nums = sorted(seats.keys())
+
+    # ── positions (all players) ───────────────────────────────────────────────
+    position: str | None = None
+    player_positions: dict[str, str] = {}
+    if button_seat and seat_nums:
+        n = len(seat_nums)
+        pos_names = _POSITION_MAPS.get(n, ['BTN', 'SB', 'BB', 'UTG', 'HJ', 'CO'])
+        btn_idx = seat_nums.index(button_seat) if button_seat in seat_nums else 0
+        for i, seat_num in enumerate(seat_nums):
+            offset = (i - btn_idx) % n
+            pos = pos_names[offset] if offset < len(pos_names) else '?'
+            name = seats[seat_num]
+            player_positions[name] = pos
+        if hero_seat:
+            position = player_positions.get('Hero')
+
+    # ── hole cards ────────────────────────────────────────────────────────────
+    hcm = re.search(r'Dealt to Hero \[([^\]]+)\]', hand_text)
+    hole_cards = hcm.group(1).split() if hcm else []
+
+    # ── board ─────────────────────────────────────────────────────────────────
+    board: list[str] = []
+    fm = re.search(r'\*\*\* FLOP \*\*\* \[([^\]]+)\]', hand_text)
+    um = re.search(r'\*\*\* TURN \*\*\* \[[^\]]+\] \[([^\]]+)\]', hand_text)
+    rm = re.search(r'\*\*\* RIVER \*\*\* \[[^\]]+\] \[([^\]]+)\]', hand_text)
+    if fm: board.extend(fm.group(1).split())
+    if um: board.extend(um.group(1).split())
+    if rm: board.extend(rm.group(1).split())
+
+    # ── pot type ──────────────────────────────────────────────────────────────
+    # Count raises in the preflop section
+    preflop_section = re.search(
+        r'\*\*\* HOLE CARDS \*\*\*(.*?)(?:\*\*\* (?:FLOP|SHOW DOWN|SUMMARY) \*\*\*)',
+        hand_text, re.DOTALL,
+    )
+    preflop_raises = 0
+    if preflop_section:
+        preflop_raises = len(re.findall(r'\S+: raises \$', preflop_section.group(1)))
+
+    if preflop_raises <= 1:
+        pot_type = 'single-raise'
+    elif preflop_raises == 2:
+        pot_type = '3bet'
+    else:
+        pot_type = '4bet+'
+
+    # Multiway: 3+ unique players with actions on the flop
+    flop_section = re.search(
+        r'\*\*\* FLOP \*\*\*.*?(.*?)(?:\*\*\* (?:TURN|SHOW DOWN|SUMMARY) \*\*\*)',
+        hand_text, re.DOTALL,
+    )
+    is_multiway = False
+    if flop_section:
+        flop_actors = set(re.findall(r'^(\S+):', flop_section.group(1), re.MULTILINE))
+        flop_actors = {p for p in flop_actors if p not in {'Uncalled', 'Total', 'Board'} and not p.startswith('*')}
+        is_multiway = len(flop_actors) >= 3
+
+    # ── showdown ──────────────────────────────────────────────────────────────
+    went_to_showdown = '*** SHOW DOWN ***' in hand_text or bool(re.search(r'Hero: shows \[', hand_text))
+
+    # Collect all shown cards at showdown (all players including Hero)
+    showdown_cards: dict[str, list[str]] = {}
+    for m in re.finditer(r'(\S+): shows \[([^\]]+)\]', hand_text):
+        showdown_cards[m.group(1)] = m.group(2).split()
+
+    # ── net winnings ──────────────────────────────────────────────────────────
+    net, net_bb, hero_invested = _parse_net(hand_text, bb_val)
+
+    # ── pot + rake ────────────────────────────────────────────────────────────
+    pot_m  = re.search(r'Total pot \$([0-9.]+)', hand_text)
+    rake_m = re.search(r'Rake \$([0-9.]+)', hand_text)
+    pot        = float(pot_m.group(1))  if pot_m  else 0.0
+    total_rake = float(rake_m.group(1)) if rake_m else 0.0
+    # Hero's rake share = proportional to their investment in the pot
+    rake = round(total_rake * (hero_invested / pot), 4) if pot > 0 else 0.0
+
+    # ── opponents ─────────────────────────────────────────────────────────────
+    opponents = [name for name in seats.values() if name != 'Hero']
+
+    # ── streets ───────────────────────────────────────────────────────────────
+    streets = _parse_streets(hand_text, bb_val)
+
+    return {
+        'handId':          hand_id,
+        'timestamp':       timestamp.isoformat(),
+        'stakes':          stakes,
+        'bb':              bb_val,
+        'position':        position,
+        'holeCards':       hole_cards,
+        'board':           board,
+        'netWinnings':     net,
+        'netBB':           net_bb,
+        'pot':             pot,
+        'rake':            rake,
+        'potType':         pot_type,
+        'isMultiway':      is_multiway,
+        'wentToShowdown':  went_to_showdown,
+        'showdownCards':   showdown_cards,
+        'opponents':       opponents,
+        'playerPositions': player_positions,
+        'streets':         streets,
+    }
+
+
+def parse_files_full(contents: list[str]) -> list[dict]:
+    """Parse all hands from all file contents, sorted newest-first."""
+    hands = []
+    for content in contents:
+        for hand_text in split_hands(content):
+            h = parse_hand_full(hand_text)
+            if h:
+                hands.append(h)
+    hands.sort(key=lambda h: h['timestamp'], reverse=True)
+    return hands

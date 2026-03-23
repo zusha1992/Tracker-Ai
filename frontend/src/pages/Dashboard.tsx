@@ -1,36 +1,36 @@
 import { useHandStore } from '../store/handStore'
+import { useFilteredHands } from '../hooks/useFilteredHands'
 import { FileUpload } from '../features/upload/FileUpload'
 import { FileStatus } from '../features/upload/FileStatus'
-import { format } from 'date-fns'
 
 const API = 'http://localhost:8000'
 
 export const Dashboard = () => {
-  const rawFiles = useHandStore((s) => s.rawFiles)
-  const isParsing = useHandStore((s) => s.isParsing)
-  const parseSummary = useHandStore((s) => s.parseSummary)
+  const rawFiles   = useHandStore((s) => s.rawFiles)
+  const isParsing  = useHandStore((s) => s.isParsing)
+  const allHands   = useHandStore((s) => s.hands)
+  const hands      = useFilteredHands()
   const parseError = useHandStore((s) => s.parseError)
-  const setIsParsing = useHandStore((s) => s.setIsParsing)
-  const setParseSummary = useHandStore((s) => s.setParseSummary)
+  const setIsParsing  = useHandStore((s) => s.setIsParsing)
+  const setHands      = useHandStore((s) => s.setHands)
   const setParseError = useHandStore((s) => s.setParseError)
 
   const handleParse = async () => {
     if (!rawFiles.length) return
     setIsParsing(true)
     setParseError(null)
-    setParseSummary(null)
 
     try {
       const form = new FormData()
       for (const file of rawFiles) form.append('files', file)
 
-      const res = await fetch(`${API}/api/parse/summary`, { method: 'POST', body: form })
+      const res = await fetch(`${API}/api/parse/hands`, { method: 'POST', body: form })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }))
         throw new Error(err.detail ?? 'Parse failed')
       }
       const data = await res.json()
-      setParseSummary(data)
+      setHands(data.hands)
     } catch (e) {
       setParseError(e instanceof Error ? e.message : 'Unknown error')
     } finally {
@@ -38,13 +38,15 @@ export const Dashboard = () => {
     }
   }
 
-  const fmtDate = (iso: string | null) => {
-    if (!iso) return '—'
-    try { return format(new Date(iso), 'MMM d, yyyy') } catch { return iso }
-  }
+  // Compute stats from hands
+  const totalProfit = hands.reduce((s, h) => s + h.netWinnings, 0)
+  const totalRake   = hands.reduce((s, h) => s + h.rake, 0)
+  const totalBB     = hands.reduce((s, h) => s + h.netBB, 0)
+  const bb100       = hands.length > 0 ? (totalBB / hands.length) * 100 : 0
 
   return (
-    <div className="max-w-2xl mx-auto space-y-4">
+    <div className="max-w-3xl mx-auto space-y-6">
+      {/* Upload section */}
       <div>
         <h2 className="text-base font-semibold text-[var(--text-primary)]">Import Hand History</h2>
         <p className="text-sm text-[var(--text-muted)] mt-0.5">
@@ -73,32 +75,50 @@ export const Dashboard = () => {
         </div>
       )}
 
-      {parseSummary && (
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-5 space-y-4">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[var(--bg-elevated)] text-[var(--text-muted)]">
-              {parseSummary.site}
-            </span>
-            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[var(--accent-green)] text-white">
-              Parsed
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <Stat label="Total Hands" value={parseSummary.handCount.toLocaleString()} />
-            <Stat label="Hero" value={parseSummary.hero} />
-            <Stat label="Stakes" value={parseSummary.stakes.join(', ') || '—'} />
-            <Stat label="Date Range" value={`${fmtDate(parseSummary.dateRange.first)} → ${fmtDate(parseSummary.dateRange.last)}`} />
-          </div>
+      {/* Stat cards */}
+      {allHands.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <StatCard label="Total Hands" value={hands.length.toLocaleString()} />
+          <StatCard
+            label="Total Profit"
+            value={`${totalProfit >= 0 ? '+' : ''}$${totalProfit.toFixed(2)}`}
+            positive={totalProfit >= 0}
+          />
+          <StatCard
+            label="BB / 100"
+            value={`${bb100 >= 0 ? '+' : ''}${bb100.toFixed(1)}`}
+            positive={bb100 >= 0}
+          />
+          <StatCard label="Rake Paid" value={`$${totalRake.toFixed(2)}`} />
         </div>
       )}
     </div>
   )
 }
 
-const Stat = ({ label, value }: { label: string; value: string }) => (
-  <div>
-    <p className="text-xs text-[var(--text-muted)] mb-0.5">{label}</p>
-    <p className="text-sm font-semibold text-[var(--text-primary)]">{value}</p>
+const StatCard = ({
+  label,
+  value,
+  positive,
+}: {
+  label: string
+  value: string
+  positive?: boolean
+}) => (
+  <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-4">
+    <p className="text-xs text-[var(--text-muted)] mb-1">{label}</p>
+    <p
+      className="text-lg font-bold"
+      style={{
+        color:
+          positive === undefined
+            ? 'var(--text-primary)'
+            : positive
+            ? 'var(--accent-green)'
+            : 'var(--accent-red)',
+      }}
+    >
+      {value}
+    </p>
   </div>
 )

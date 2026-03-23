@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { Hand } from '../types/hand'
 
 export interface ParseSummary {
   handCount: number
@@ -13,10 +14,13 @@ interface HandState {
   setRawFiles: (files: File[]) => void
   addRawFiles: (files: File[]) => void
   clearRawFiles: () => void
-  parseSummary: ParseSummary | null
-  setParseSummary: (s: ParseSummary | null) => void
+
+  hands: Hand[]
+  setHands: (hands: Hand[]) => void
+
   isParsing: boolean
   setIsParsing: (v: boolean) => void
+
   parseError: string | null
   setParseError: (e: string | null) => void
 }
@@ -31,10 +35,13 @@ export const useHandStore = create<HandState>((set, get) => ({
     set({ rawFiles: [...existing, ...newFiles] })
   },
   clearRawFiles: () => set({ rawFiles: [] }),
-  parseSummary: null,
-  setParseSummary: (s) => set({ parseSummary: s }),
+
+  hands: [],
+  setHands: (hands) => set({ hands }),
+
   isParsing: false,
   setIsParsing: (v) => set({ isParsing: v }),
+
   parseError: null,
   setParseError: (e) => set({ parseError: e }),
 }))
