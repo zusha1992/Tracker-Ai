@@ -443,3 +443,120 @@ def parse_files_full(contents: list[str]) -> list[dict]:
                 hands.append(h)
     hands.sort(key=lambda h: h['timestamp'], reverse=True)
     return hands
+
+
+def compute_pool_stats(parsed_hands: list[dict]) -> dict:
+    """Aggregate player pool statistics from all parsed hands (opponents only, not Hero)."""
+
+    def pct(num: int, den: int) -> float:
+        return round(num / den * 100, 1) if den > 0 else 0.0
+
+    # [numerator, denominator] for each stat
+    vpip          = [0, 0]
+    pfr           = [0, 0]
+    threebet      = [0, 0]
+    fold_flop     = [0, 0]
+    fold_turn     = [0, 0]
+    fold_river    = [0, 0]
+    flop_cbet     = [0, 0]
+    wtsd          = [0, 0]
+
+    for hand in parsed_hands:
+        streets   = hand.get('streets', {})
+        opponents = hand.get('opponents', [])
+        showdown_cards = hand.get('showdown_cards', {})
+
+        if not opponents:
+            continue
+
+        opp_set = set(opponents)
+
+        # ── Preflop ──────────────────────────────────────────────────────────
+        preflop = streets.get('preflop', [])
+
+        # Walk through preflop: track voluntary raise count BEFORE each action
+        raise_count = 0   # voluntary raises seen so far in the street
+        opp_pf: dict[str, list[tuple[str, int]]] = {opp: [] for opp in opponents}
+
+        for act in preflop:
+            player, raw = act['player'], act['action']
+            if player in opp_set:
+                opp_pf[player].append((raw, raise_count))
+            if re.match(r'raises', raw):
+                raise_count += 1
+
+        for opp in opponents:
+            acts = opp_pf[opp]
+
+            vpip[1] += 1
+            pfr[1]  += 1
+            threebet[1] += 1
+
+            did_vpip  = any(re.match(r'(calls|raises|bets)', a[0]) for a in acts)
+            did_pfr   = any(re.match(r'raises', a[0]) for a in acts)
+            # 3-bet: opponent raised when at least one voluntary raise had already happened
+            did_3bet  = any(re.match(r'raises', a[0]) and a[1] >= 1 for a in acts)
+
+            if did_vpip:  vpip[0]     += 1
+            if did_pfr:   pfr[0]      += 1
+            if did_3bet:  threebet[0] += 1
+
+        # ── Preflop aggressor (for c-bet tracking) ───────────────────────────
+        # Last player (opponent or Hero) to raise preflop
+        preflop_aggressor = None
+        for act in reversed(preflop):
+            if re.match(r'raises', act['action']):
+                preflop_aggressor = act['player']
+                break
+
+        # ── Flop c-bet ───────────────────────────────────────────────────────
+        flop = streets.get('flop', [])
+        if flop and preflop_aggressor and preflop_aggressor in opp_set:
+            flop_cbet[1] += 1
+            # First action by preflop aggressor on flop
+            agg_acts = [a for a in flop if a['player'] == preflop_aggressor]
+            if agg_acts and re.match(r'bets|raises', agg_acts[0]['action']):
+                flop_cbet[0] += 1
+
+        # ── Fold vs aggression (flop / turn / river) ─────────────────────────
+        for street_name, counter in [
+            ('flop',  fold_flop),
+            ('turn',  fold_turn),
+            ('river', fold_river),
+        ]:
+            acts = streets.get(street_name, [])
+            facing_bet = False
+
+            for act in acts:
+                player, raw = act['player'], act['action']
+
+                if re.match(r'bets|raises', raw):
+                    facing_bet = True
+                elif raw == 'checks':
+                    facing_bet = False
+                elif player in opp_set and facing_bet:
+                    counter[1] += 1
+                    if raw == 'folds':
+                        counter[0] += 1
+
+        # ── WTSD ─────────────────────────────────────────────────────────────
+        # Opportunity: opponent appeared on the flop
+        if flop:
+            flop_players = {a['player'] for a in flop}
+            for opp in opponents:
+                if opp in flop_players:
+                    wtsd[1] += 1
+                    if opp in showdown_cards:
+                        wtsd[0] += 1
+
+    return {
+        'hands':        len(parsed_hands),
+        'vpip':         pct(*vpip),
+        'pfr':          pct(*pfr),
+        'threeBet':     pct(*threebet),
+        'foldFlopBet':  pct(*fold_flop),
+        'foldTurnBet':  pct(*fold_turn),
+        'foldRiverBet': pct(*fold_river),
+        'flopCbet':     pct(*flop_cbet),
+        'wtsd':         pct(*wtsd),
+    }

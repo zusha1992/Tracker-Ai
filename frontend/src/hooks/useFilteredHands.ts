@@ -21,11 +21,13 @@ export function useFilteredHands(): Hand[] {
       if (f.dateTo && h.timestamp > f.dateTo + 'T23:59:59') return false
       if (f.holeCardsFilter.length) {
         const heroRanks = h.holeCards.map((c) => c[0].toUpperCase())
-        if (!f.holeCardsFilter.every((r) => heroRanks.includes(r))) return false
+        const needed = f.holeCardsFilter.reduce<Record<string, number>>((acc, r) => { acc[r] = (acc[r] ?? 0) + 1; return acc }, {})
+        if (!Object.entries(needed).every(([r, n]) => heroRanks.filter((x) => x === r).length >= n)) return false
       }
       if (f.boardFilter.length) {
         const boardRanks = h.board.map((c) => c[0].toUpperCase())
-        if (!f.boardFilter.every((r) => boardRanks.includes(r))) return false
+        const needed = f.boardFilter.reduce<Record<string, number>>((acc, r) => { acc[r] = (acc[r] ?? 0) + 1; return acc }, {})
+        if (!Object.entries(needed).every(([r, n]) => boardRanks.filter((x) => x === r).length >= n)) return false
       }
       return true
     })

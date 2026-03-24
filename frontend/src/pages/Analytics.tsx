@@ -1,8 +1,8 @@
 import { useMemo, useState, useTransition, useDeferredValue } from 'react'
 import { useHandStore } from '../store/handStore'
-import { useThemeStore } from '../store/themeStore'
-import { getChartColors } from '../theme/tokens'
 import { AnalyticsChart, type ChartId, type MergedPoint } from '../features/graphs/AnalyticsChart'
+import { FilterBar } from '../features/filters/FilterBar'
+import { useFilteredHands } from '../hooks/useFilteredHands'
 import { cn } from '../lib/cn'
 import type { Hand } from '../types/hand'
 
@@ -38,12 +38,11 @@ function buildMergedPoints(hands: Hand[]): MergedPoint[] {
 
 export const Analytics = () => {
   const allHands = useHandStore((s) => s.hands)
-  const isDark = useThemeStore((s) => s.isDark)
-  getChartColors(isDark)
+  const filteredHands = useFilteredHands()
   const [activeChart, setActiveChart] = useState<ChartId>('all')
   const [isPending, startTransition] = useTransition()
 
-  const points = useMemo(() => buildMergedPoints(allHands), [allHands])
+  const points = useMemo(() => buildMergedPoints(filteredHands), [filteredHands])
   const deferredPoints = useDeferredValue(points)
 
   if (!allHands.length) {
@@ -56,6 +55,8 @@ export const Analytics = () => {
 
   return (
     <div className="space-y-4">
+      <FilterBar count={filteredHands.length} />
+
       {/* Tab selector */}
       <div className="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2">
         {TABS.map(({ id, label }) => (

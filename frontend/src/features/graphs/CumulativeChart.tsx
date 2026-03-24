@@ -10,7 +10,6 @@ import {
   Brush,
   CartesianGrid,
 } from 'recharts'
-import { useThemeStore } from '../../store/themeStore'
 import { getChartColors } from '../../theme/tokens'
 import { HandDetailModal } from '../hands/HandDetailModal'
 import type { Hand } from '../../types/hand'
@@ -54,8 +53,7 @@ const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: { payl
 }
 
 export const CumulativeChart = ({ points, color, title, height = 260, showBrush = true }: Props) => {
-  const isDark = useThemeStore((s) => s.isDark)
-  const colors = getChartColors(isDark)
+  const colors = getChartColors()
   const [selectedHand, setSelectedHand] = useState<Hand | null>(null)
   const [selectedArrayIdx, setSelectedArrayIdx] = useState<number | null>(null)
 
@@ -87,6 +85,18 @@ export const CumulativeChart = ({ points, color, title, height = 260, showBrush 
       : undefined
 
   const gradientId = `grad-${title.replace(/\s+/g, '')}`
+
+  // Clean round tick values that actually exist in the data (index = 1..N)
+  const maxIdx = points[points.length - 1]?.index ?? 0
+  const xTicks = (() => {
+    if (!maxIdx) return []
+    const raw = maxIdx / 6
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)))
+    const step = Math.ceil(raw / mag) * mag
+    const t: number[] = []
+    for (let v = step; v <= maxIdx; v += step) t.push(Math.round(v))
+    return t
+  })()
 
   if (!points.length) {
     return (
@@ -125,8 +135,8 @@ export const CumulativeChart = ({ points, color, title, height = 260, showBrush 
               tick={{ fontSize: 10, fill: colors.muted }}
               axisLine={false}
               tickLine={false}
-              tickFormatter={(v) => `#${v}`}
-              interval="preserveStartEnd"
+              ticks={xTicks}
+              tickFormatter={(v) => Number(v).toLocaleString()}
             />
             <YAxis
               tick={{ fontSize: 10, fill: colors.muted }}
@@ -148,6 +158,10 @@ export const CumulativeChart = ({ points, color, title, height = 260, showBrush 
               fill={`url(#${gradientId})`}
               dot={false}
               activeDot={{ r: 4, fill: color, stroke: colors.surface, strokeWidth: 2 }}
+              isAnimationActive={true}
+              animationBegin={150}
+              animationDuration={1000}
+              animationEasing="ease-out"
             />
 
             {showBrush && (

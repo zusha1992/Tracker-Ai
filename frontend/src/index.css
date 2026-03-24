@@ -12,6 +12,9 @@
     --text-primary: #1f2328;
     --text-muted: #636c76;
     --border: #d0d7de;
+    --chart-blue: #0969da;
+    --chart-orange: #bc4c00;
+    --chart-gray: #9ca3af;
   }
 
   .dark {
@@ -23,6 +26,9 @@
     --text-primary: #e6edf3;
     --text-muted: #8b949e;
     --border: #30363d;
+    --chart-blue: #58a6ff;
+    --chart-orange: #f0883e;
+    --chart-gray: #555e6b;
   }
 
   * {

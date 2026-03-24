@@ -9,7 +9,6 @@ import {
   ReferenceLine,
   CartesianGrid,
 } from 'recharts'
-import { useThemeStore } from '../../store/themeStore'
 import { getChartColors } from '../../theme/tokens'
 import { HandDetailModal } from '../hands/HandDetailModal'
 import type { Hand } from '../../types/hand'
@@ -91,8 +90,7 @@ interface Props {
 }
 
 export const AnalyticsChart = ({ points, activeChart }: Props) => {
-  const isDark = useThemeStore((s) => s.isDark)
-  const colors = getChartColors(isDark)
+  const colors = getChartColors()
   const [selectedHand, setSelectedHand] = useState<Hand | null>(null)
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
   const [hidden, setHidden] = useState<Set<string>>(new Set())
@@ -128,7 +126,7 @@ export const AnalyticsChart = ({ points, activeChart }: Props) => {
     blue:   colors.blue,
     red:    colors.red,
     orange: colors.orange,
-    gray:   isDark ? '#555e6b' : '#9ca3af',
+    gray:   colors.gray,
   }
 
   // In single-tab mode: show only that series (ignoring toggle state)
@@ -140,8 +138,20 @@ export const AnalyticsChart = ({ points, activeChart }: Props) => {
   // Legend always shows all series so you can toggle in "all" mode
   const legendSeries = activeChart === 'all' ? SERIES : SERIES.filter((s) => s.key === activeChart)
 
-  // Show ~7 evenly spaced tick labels across the categorical axis
-  const xTickInterval = Math.max(1, Math.floor(points.length / 7)) - 1
+  // Clean round ticks snapped to nearest existing point.index (data may be downsampled)
+  const xTicks = (() => {
+    if (!points.length) return []
+    const maxIdx = points[points.length - 1].index
+    const raw = maxIdx / 6
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)))
+    const step = Math.ceil(raw / mag) * mag
+    const desired: number[] = []
+    for (let v = step; v <= maxIdx; v += step) desired.push(Math.round(v))
+    // Snap each desired value to the nearest actual index in the data
+    return [...new Set(
+      desired.map(t => points.reduce((b, p) => Math.abs(p.index - t) < Math.abs(b.index - t) ? p : b).index)
+    )]
+  })()
 
   return (
     <>
@@ -191,7 +201,7 @@ export const AnalyticsChart = ({ points, activeChart }: Props) => {
               tick={{ fontSize: 11, fill: colors.muted, fontWeight: 500 }}
               axisLine={{ stroke: colors.border }}
               tickLine={false}
-              interval={xTickInterval}
+              ticks={xTicks}
               tickFormatter={(v) => Number(v).toLocaleString()}
             />
             <YAxis

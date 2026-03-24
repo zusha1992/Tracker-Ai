@@ -1,6 +1,7 @@
-import { useMemo } from 'react'
-import { Loader2 } from 'lucide-react'
+import { useMemo, useEffect, useState } from 'react'
+import { Loader2, Trash2 } from 'lucide-react'
 import { useHandStore } from '../store/handStore'
+import { usePoolStatsStore } from '../store/poolStatsStore'
 import { useFilteredHands } from '../hooks/useFilteredHands'
 import { useThemeStore } from '../store/themeStore'
 import { getChartColors } from '../theme/tokens'
@@ -9,6 +10,8 @@ import { FileStatus } from '../features/upload/FileStatus'
 import { CumulativeChart } from '../features/graphs/CumulativeChart'
 
 const API = 'http://localhost:8000'
+
+interface Session { date: string; stakes: string; hand_count: number }
 
 export const Dashboard = () => {
   const rawFiles   = useHandStore((s) => s.rawFiles)
@@ -21,6 +24,40 @@ export const Dashboard = () => {
   const setIsParsing  = useHandStore((s) => s.setIsParsing)
   const setHands      = useHandStore((s) => s.setHands)
   const setParseError = useHandStore((s) => s.setParseError)
+  const setPoolStats  = usePoolStatsStore((s) => s.setStats)
+  const clearPoolStats = usePoolStatsStore((s) => s.clear)
+
+  const [sessions, setSessions]   = useState<Session[]>([])
+  const [deleting, setDeleting]   = useState<string | null>(null)
+
+  useEffect(() => {
+    fetch(`${API}/api/sessions`)
+      .then((r) => r.json())
+      .then((d) => setSessions(d.sessions ?? []))
+      .catch(() => {})
+  }, [allHands])
+
+  const handleDeleteSession = async (date: string) => {
+    setDeleting(date)
+    try {
+      await fetch(`${API}/api/sessions/${date}`, { method: 'DELETE' })
+      const data = await fetch(`${API}/api/hands`).then((r) => r.json())
+      setHands(data.hands ?? [])
+      if (data.poolStats) setPoolStats(data.poolStats)
+      else clearPoolStats()
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setDeleting(null)
+    }
+  }
+
+  const handleClearAll = async () => {
+    if (!confirm('Delete all saved hands?')) return
+    await fetch(`${API}/api/hands`, { method: 'DELETE' })
+    setHands([])
+    clearPoolStats()
+  }
 
   const handleParse = async () => {
     if (!rawFiles.length) return
@@ -38,6 +75,7 @@ export const Dashboard = () => {
       }
       const data = await res.json()
       setHands(data.hands)
+      if (data.poolStats) setPoolStats(data.poolStats)
     } catch (e) {
       setParseError(e instanceof Error ? e.message : 'Unknown error')
     } finally {
@@ -105,10 +143,53 @@ export const Dashboard = () => {
         </div>
       )}
 
+      {/* Saved sessions */}
+      {sessions.length > 0 && (
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--border)]">
+            <span className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">Saved Data</span>
+            <button
+              onClick={handleClearAll}
+              className="text-xs text-[var(--accent-red)] hover:opacity-75 transition-opacity"
+            >
+              Clear all
+            </button>
+          </div>
+          <div className="divide-y divide-[var(--border)]">
+            {sessions.map((s) => (
+              <div key={`${s.date}-${s.stakes}`} className="flex items-center justify-between px-4 py-2 text-xs">
+                <span className="text-[var(--text-primary)] font-medium">{s.date}</span>
+                <span className="text-[var(--text-muted)]">{s.stakes}</span>
+                <span className="text-[var(--text-muted)]">{s.hand_count.toLocaleString()} hands</span>
+                <button
+                  onClick={() => handleDeleteSession(s.date)}
+                  disabled={deleting === s.date}
+                  className="text-[var(--text-muted)] hover:text-[var(--accent-red)] transition-colors disabled:opacity-40"
+                >
+                  {deleting === s.date ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Skeleton while parsing */}
+      {isParsing && allHands.length === 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-4 h-[72px] animate-pulse">
+              <div className="h-2.5 w-20 rounded bg-[var(--bg-elevated)] mb-3" />
+              <div className="h-5 w-16 rounded bg-[var(--bg-elevated)]" />
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Stat cards */}
       {allHands.length > 0 && (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3" style={{ animation: 'chart-fadein 0.4s ease' }}>
             <StatCard label="Total Hands" value={hands.length.toLocaleString()} />
             <StatCard
               label="Total Profit"

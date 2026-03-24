@@ -1,3 +1,4 @@
+import { useTransition } from 'react'
 import { Sun, Moon } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useLocation } from 'react-router-dom'
@@ -12,6 +13,7 @@ const pageTitles: Record<string, string> = {
 
 export const TopBar = () => {
   const { isDark, toggle } = useTheme()
+  const [, startTransition] = useTransition()
   const location = useLocation()
   const title = pageTitles[location.pathname] ?? 'Tracker AI'
 
@@ -20,7 +22,7 @@ export const TopBar = () => {
       <h1 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h1>
 
       <button
-        onClick={toggle}
+        onClick={() => startTransition(toggle)}
         aria-label="Toggle theme"
         className="w-8 h-8 flex items-center justify-center rounded-md text-[var(--text-muted)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] transition-colors"
       >
