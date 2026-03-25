@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { X } from 'lucide-react'
 import { useFilterStore, type FilterState } from '../../store/filterStore'
 import { useHandStore } from '../../store/handStore'
 import { CardSlotsFilter } from './CardSlotsFilter'
 import { cn } from '../../lib/cn'
+import { buildSessions, formatTime, formatDuration } from '../../lib/sessions'
 
 const POSITIONS = ['BTN', 'CO', 'HJ', 'UTG', 'BB', 'SB']
 const POT_TYPES = [
@@ -32,7 +33,7 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
   )
 }
 
-type Tab = 'position' | 'stakes' | 'potType' | 'result' | 'date' | 'cards' | null
+type Tab = 'position' | 'stakes' | 'potType' | 'result' | 'date' | 'cards' | 'session' | null
 
 function tabHasFilter(tab: Tab, f: FilterState): boolean {
   if (tab === 'position') return f.positions.length > 0
@@ -41,6 +42,7 @@ function tabHasFilter(tab: Tab, f: FilterState): boolean {
   if (tab === 'result')   return f.result !== 'all' || f.showdown !== 'all'
   if (tab === 'date')     return f.dateFrom !== null || f.dateTo !== null
   if (tab === 'cards')    return f.holeCardsFilter.length > 0 || f.boardFilter.length > 0
+  if (tab === 'session')  return f.sessionStart !== null
   return false
 }
 
@@ -51,6 +53,7 @@ const NAV_TABS: { id: Tab; label: string }[] = [
   { id: 'result',   label: 'Result' },
   { id: 'date',     label: 'Date' },
   { id: 'cards',    label: 'Cards' },
+  { id: 'session',  label: 'Session' },
 ]
 
 export const FilterBar = ({ count }: { count: number }) => {
@@ -59,6 +62,7 @@ export const FilterBar = ({ count }: { count: number }) => {
   const [activeTab, setActiveTab] = useState<Tab>(null)
 
   const availableStakes = [...new Set(allHands.map((h) => h.stakes))].sort()
+  const sessions = useMemo(() => buildSessions(allHands), [allHands])
 
   const totalActive = NAV_TABS.filter((t) => tabHasFilter(t.id, f)).length
 
@@ -180,6 +184,44 @@ export const FilterBar = ({ count }: { count: number }) => {
                 maxCards={2} onChange={f.setHoleCardsFilter} />
               <CardSlotsFilter label="Board" selected={f.boardFilter}
                 maxCards={5} onChange={f.setBoardFilter} />
+            </div>
+          )}
+
+          {activeTab === 'session' && (
+            <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
+              {sessions.length === 0 && (
+                <span className="text-xs text-[var(--text-muted)]">No sessions found.</span>
+              )}
+              {sessions.map((s) => {
+                const isActive = f.sessionStart === s.startTime
+                const profitColor = s.profit >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => isActive ? f.clearSession() : f.setSession(s.startTime, s.endTime)}
+                    className={cn(
+                      'px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors select-none text-left',
+                      isActive
+                        ? 'bg-[var(--accent-green)] border-[var(--accent-green)] text-white'
+                        : 'border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                    )}
+                  >
+                    <span className="font-medium">{s.date}</span>
+                    <span className="mx-1 opacity-60">·</span>
+                    <span>{formatTime(s.startTime)}</span>
+                    <span className="mx-1 opacity-60">–</span>
+                    <span>{formatTime(s.endTime)}</span>
+                    <span className="mx-1 opacity-60">·</span>
+                    <span>{s.stakes}</span>
+                    <span className="mx-1 opacity-60">·</span>
+                    <span style={{ color: isActive ? 'white' : profitColor }}>
+                      {s.profit >= 0 ? '+' : ''}${s.profit.toFixed(2)}
+                    </span>
+                    <span className="mx-1 opacity-60">·</span>
+                    <span>{formatDuration(s.durationMin)}</span>
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>

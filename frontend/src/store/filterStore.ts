@@ -11,6 +11,8 @@ export interface FilterState {
   dateTo: string | null
   holeCardsFilter: string[]   // max 2 specific cards
   boardFilter: string[]        // max 5 specific board cards
+  sessionStart: string | null  // ISO timestamp of session's first hand
+  sessionEnd: string | null    // ISO timestamp of session's last hand
 
   setPositions: (v: string[]) => void
   setStakes: (v: string[]) => void
@@ -22,6 +24,8 @@ export interface FilterState {
   setDateTo: (v: string | null) => void
   setHoleCardsFilter: (v: string[]) => void
   setBoardFilter: (v: string[]) => void
+  setSession: (start: string, end: string) => void
+  clearSession: () => void
   clearAll: () => void
 }
 
@@ -36,6 +40,8 @@ const defaults = {
   dateTo: null,
   holeCardsFilter: [],
   boardFilter: [],
+  sessionStart: null,
+  sessionEnd: null,
 }
 
 export const useFilterStore = create<FilterState>((set) => ({
@@ -50,5 +56,7 @@ export const useFilterStore = create<FilterState>((set) => ({
   setDateTo:          (v) => set({ dateTo: v }),
   setHoleCardsFilter: (v) => set({ holeCardsFilter: v }),
   setBoardFilter:     (v) => set({ boardFilter: v }),
+  setSession:         (start, end) => set({ sessionStart: start, sessionEnd: end }),
+  clearSession:       () => set({ sessionStart: null, sessionEnd: null }),
   clearAll:           () => set(defaults),
 }))

@@ -29,7 +29,9 @@ export function useFilteredHands(): Hand[] {
         const needed = f.boardFilter.reduce<Record<string, number>>((acc, r) => { acc[r] = (acc[r] ?? 0) + 1; return acc }, {})
         if (!Object.entries(needed).every(([r, n]) => boardRanks.filter((x) => x === r).length >= n)) return false
       }
+      if (f.sessionStart && h.timestamp < f.sessionStart) return false
+      if (f.sessionEnd   && h.timestamp > f.sessionEnd)   return false
       return true
     })
-  }, [hands, f.positions, f.stakes, f.potTypes, f.multiway, f.result, f.showdown, f.dateFrom, f.dateTo, f.holeCardsFilter, f.boardFilter])
+  }, [hands, f.positions, f.stakes, f.potTypes, f.multiway, f.result, f.showdown, f.dateFrom, f.dateTo, f.holeCardsFilter, f.boardFilter, f.sessionStart, f.sessionEnd])
 }

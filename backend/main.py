@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from parsers.gg_parser import parse_files_summary, parse_files_full, compute_pool_stats
 from database import init_db, insert_hands, get_all_hands, get_sessions, delete_session, delete_all_hands
+from chat import router as chat_router
 
 app = FastAPI(title="Tracker AI API", version="0.1.0")
 
@@ -13,6 +14,7 @@ app.add_middleware(
 )
 
 init_db()
+app.include_router(chat_router)
 
 
 @app.get("/health")

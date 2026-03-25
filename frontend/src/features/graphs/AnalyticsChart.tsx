@@ -192,7 +192,7 @@ export const AnalyticsChart = ({ points, activeChart }: Props) => {
         <ResponsiveContainer width="100%" height={380} style={{ overflow: 'visible' }}>
           <LineChart
             data={points}
-            margin={{ top: 4, right: 16, left: 0, bottom: 8 }}
+            margin={{ top: 4, right: 0, left: 16, bottom: 8 }}
           >
             <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={true} />
 
@@ -205,7 +205,7 @@ export const AnalyticsChart = ({ points, activeChart }: Props) => {
               tickFormatter={(v) => Number(v).toLocaleString()}
             />
             <YAxis
-              orientation="left"
+              orientation="right"
               tick={{ fontSize: 11, fill: colors.muted, fontWeight: 500 }}
               axisLine={false}
               tickLine={false}

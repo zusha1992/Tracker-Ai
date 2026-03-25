@@ -118,7 +118,7 @@ export const CumulativeChart = ({ points, color, title, height = 260, showBrush 
           <ComposedChart
             data={points}
             onClick={handleClick}
-            margin={{ top: 4, right: 8, left: 0, bottom: showBrush ? 8 : 0 }}
+            margin={{ top: 4, right: 0, left: 8, bottom: showBrush ? 8 : 0 }}
             style={{ cursor: 'pointer' }}
           >
             <defs>
@@ -139,6 +139,7 @@ export const CumulativeChart = ({ points, color, title, height = 260, showBrush 
               tickFormatter={(v) => Number(v).toLocaleString()}
             />
             <YAxis
+              orientation="right"
               tick={{ fontSize: 10, fill: colors.muted }}
               axisLine={false}
               tickLine={false}
@@ -158,10 +159,7 @@ export const CumulativeChart = ({ points, color, title, height = 260, showBrush 
               fill={`url(#${gradientId})`}
               dot={false}
               activeDot={{ r: 4, fill: color, stroke: colors.surface, strokeWidth: 2 }}
-              isAnimationActive={true}
-              animationBegin={150}
-              animationDuration={1000}
-              animationEasing="ease-out"
+              isAnimationActive={false}
             />
 
             {showBrush && (
